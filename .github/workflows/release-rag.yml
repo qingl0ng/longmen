@@ -55,6 +55,7 @@ jobs:
 
   build:
     needs: validate
+    environment: production
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -107,6 +108,7 @@ jobs:
 
   merge:
     needs: build
+    environment: production
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
@@ -160,6 +162,7 @@ jobs:
   describe:
     needs: merge
     if: ${{ inputs.publish == true }}
+    environment: production
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
