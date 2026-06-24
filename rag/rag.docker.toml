@@ -1,0 +1,33 @@
+# RAG Service Configuration — baked container defaults (longmen-rag image)
+#
+# This file holds ONLY generic, non-secret operational defaults. Everything
+# specific to your deployment is supplied at run time and layered on top
+# (env vars override TOML; docker secrets override env). Provide via env
+# (see deploy/.env.example) — deliberately NOT baked here:
+#   RAG__TOKENIZER__PATH     /models/<your-tokenizer.json>   (mounted, ro)
+#   RAG__EMBEDDING__MODEL    /models/<your-embedding-model>  (mounted, ro)
+#   RAG__STORAGE__DATA_DIR   /data                           (volume)
+# Collections are user-specific: define them in a mounted rag.toml
+# ([collections.*]); the service starts with none.
+
+[service]
+port = 8421
+log_level = "info"
+
+[embedding]
+device = "cpu"                        # "cpu" | "cuda" | "auto" — override with RAG__EMBEDDING__DEVICE
+batch_size = 64
+# model is user-specific (a local path under /models): provide via env.
+
+[chunking]
+default_chunk_size = 1024
+default_overlap = 128
+
+[search]
+default_top_k = 10
+min_score = 0.6
+
+[watcher]
+enabled = true                        # set false / RAG__WATCHER__ENABLED=false to disable
+debounce_seconds = 3.0                # quiet window after last change before indexing starts
+watch_config = true                   # watch the mounted rag.toml for changes (hot-reload collections)

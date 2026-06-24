@@ -1,0 +1,116 @@
+# Gateway Configuration — baked container defaults (longmen-gateway image)
+# The gateway is the single source of truth for projects, agents, sessions, and permissions.
+# Auth is disabled by default. Enable pairing in [auth] when you want to restrict access.
+#
+# Hot reload: the gateway watches this file for changes. Most settings reload automatically.
+# Settings marked "requires restart" need a gateway restart to take effect.
+#
+# This file holds ONLY generic, non-secret operational defaults. Everything
+# specific to your deployment is supplied at run time and layered on top
+# (env vars override TOML; docker secrets override env). In particular, provide
+# via env (see deploy/.env.example) — they are deliberately NOT baked here:
+#   GATEWAY__MODEL__VLLM_BASE_URL    your vLLM endpoint (e.g. http://vllm:8000)
+#   GATEWAY__MODEL__MODEL_NAME       the served model name
+#   GATEWAY__MODEL__TOKENIZER_PATH   /models/<your-tokenizer.json>  (mounted, ro)
+#   GATEWAY__SERVER__DATA_DIR        /data                          (volume)
+#   GATEWAY__RAG__ENABLED / __BASE_URL  RAG wiring (set by compose)
+# Secrets (vLLM api key, Brave key) come from /run/secrets, never from this file.
+
+[server]
+port = 8420                       # requires restart
+log_level = "info"                # hot-reloadable: debug | info | warning | error
+
+[auth]
+mode = "open"                     # hot-reloadable: "open" | "paired"
+pairing_code_ttl = 300            # hot-reloadable (seconds)
+token_lifetime_days = 90          # hot-reloadable
+
+[model]
+# Default backend — used for interactive sessions and agents without a backend override.
+# All model settings are hot-reloadable. Changes take effect on the next agent invocation.
+# vllm_base_url, model_name and tokenizer_path are user-specific: provide via env.
+temperature = 0.7
+top_p = 0.95
+
+# Named backends — agents reference these by key. Per-backend tokenizers are
+# planned; token counting currently uses the single [model] tokenizer above.
+
+[permissions]
+# Hot-reloadable. Changes take effect on the next tool call.
+workflow_mode = "allow_all"       # "allow_all" = skip approval in workflows, "prompt" = still ask
+default_safe = [
+    "read_file",
+    "list_dir",
+    "grep",
+    "tree",
+    "symbols",
+    "git_status",
+    "git_diff",
+    "git_log",
+    "web_search",
+    "web_fetch",
+]
+default_destructive = [
+    "rm",
+    "git_push_force",
+    "drop_table",
+    "truncate",
+]
+
+[timeouts]
+# Hot-reloadable. Changes take effect on the next operation.
+tool_execution = 120              # seconds
+approval_wait = 300               # seconds
+vllm_request = 60                 # seconds
+
+[context]
+# Hot-reloadable. Context window management thresholds and budget sizes.
+#
+# Pinned segments are never pruned or compacted.
+pin_first_tokens = 2000           # tokens reserved for the first N turns (task definition)
+pin_recent_tokens = 3000          # tokens reserved for the most recent N turns (working context)
+reserved_response_tokens = 4096   # tokens reserved for the model's response
+#
+# Pressure thresholds — fraction of context_limit at which each action triggers.
+prune_threshold = 0.75            # stale tool outputs are pruned at this pressure
+compact_threshold = 0.85          # middle is compacted (model summarises) at this pressure
+warn_threshold = 0.95             # warning sent to client at this pressure
+#
+# How many tokens the compaction summary should target.
+compact_target_tokens = 1000
+
+[planning]
+# Hot-reloadable. Planning-related settings.
+max_revisions = 5
+
+[sessions]
+# Hot-reloadable at restart. Session persistence settings.
+max_sessions_per_project = 50      # keep only N most recent sessions per project
+max_session_age_days = 30          # delete sessions older than this
+
+[web]
+# Hot-reloadable. Web search and fetch settings.
+search_enabled = true
+fetch_enabled = true
+
+# API key for Brave Search comes from env/secret, never this file:
+# GATEWAY__WEB__BRAVE_API_KEY or the BRAVE_API_KEY env var (or /run/secrets).
+
+# Number of search results to return (passed to Brave API as 'count')
+search_count = 5
+
+# Timeout for fetching web pages (seconds)
+fetch_timeout = 15
+
+# Maximum number of HTTP redirects to follow
+fetch_max_redirects = 5
+
+# Domains blocked from web_fetch (web_search results are not filtered)
+fetch_blocked_domains = []
+
+# User-Agent string for HTTP requests uses the built-in default; override with
+# GATEWAY__WEB__USER_AGENT if needed.
+
+# Projects, agents, and their prompts are stored in {data_dir}/projects/.
+# They are managed through the WebSocket protocol (project_upsert, agent_upsert, etc.)
+# or by editing the TOML/markdown files directly (changes are hot-reloaded automatically).

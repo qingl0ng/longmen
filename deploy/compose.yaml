@@ -1,0 +1,116 @@
+# Longmen — Docker Compose deployment
+#
+# Quick start:
+#   1. cp .env.example .env   and edit the values (model name, mount paths, …)
+#   2. Put your tokenizer.json + embedding model under the MODELS_DIR you set.
+#   3. docker compose up -d
+#
+# What runs by default: the gateway (loopback only) + RAG (internal only).
+# vLLM is a commented example below — run your own or point the gateway at an
+# external vLLM via GATEWAY__MODEL__VLLM_BASE_URL in .env.
+#
+# Config precedence (low→high): image-baked TOML < env vars (.env) < docker
+# secrets (./secrets/*). Nothing user-specific or secret is baked into the images.
+
+services:
+  gateway:
+    image: ${GATEWAY_IMAGE:-longmen-gateway:latest}
+    restart: unless-stopped
+    # Loopback only — the local terminal client connects here. For remote
+    # access, change to "0.0.0.0:..." AND set GATEWAY__AUTH__MODE=paired.
+    ports:
+      - "127.0.0.1:${GATEWAY_PORT:-8420}:8420"
+    environment:
+      # --- topology: must match the volumes/network below; do not change ---
+      GATEWAY__SERVER__DATA_DIR: /data
+      # --- RAG wiring (defaults correct for this compose; override in .env) ---
+      GATEWAY__RAG__ENABLED: ${GATEWAY__RAG__ENABLED:-true}
+      GATEWAY__RAG__BASE_URL: ${GATEWAY__RAG__BASE_URL:-http://rag:8421}
+      # --- user config (edit values in .env) ---
+      GATEWAY__MODEL__VLLM_BASE_URL: ${GATEWAY__MODEL__VLLM_BASE_URL:-http://vllm:8000}
+      GATEWAY__MODEL__MODEL_NAME: ${GATEWAY__MODEL__MODEL_NAME:?set GATEWAY__MODEL__MODEL_NAME in .env}
+      GATEWAY__MODEL__TOKENIZER_PATH: ${GATEWAY__MODEL__TOKENIZER_PATH:-/models/tokenizer.json}
+    volumes:
+      - gateway-data:/data                       # persistent state (projects, sessions)
+      - ${MODELS_DIR:-./models}:/models:ro        # tokenizer (read-only)
+      - ${WORKSPACE:-./workspace}:/workspace      # your code; project root_paths live here
+    # Secrets are opt-in. Uncomment here + the top-level `secrets:` block, and
+    # create the files under ./secrets/, only if you actually need them.
+    # secrets:
+    #   - gateway__model__api_key
+    #   - gateway__web__brave_api_key
+
+  rag:
+    image: ${RAG_IMAGE:-longmen-rag:latest}
+    restart: unless-stopped
+    depends_on:
+      gateway:
+        # RAG starts after the gateway. service_started (not _healthy) so RAG is
+        # not blocked if the gateway is still warming up. If you disable RAG,
+        # remove this service entirely.
+        condition: service_started
+    expose:
+      - "8421"                                    # internal only — not published to the host
+    environment:
+      # --- topology: must match the volumes below; do not change ---
+      RAG__SERVICE__HOST: "0.0.0.0"               # so the gateway can reach it by service name
+      RAG__STORAGE__DATA_DIR: /data
+      # --- user config (edit values in .env) ---
+      RAG__TOKENIZER__PATH: ${RAG__TOKENIZER__PATH:-/models/tokenizer.json}
+      RAG__EMBEDDING__MODEL: ${RAG__EMBEDDING__MODEL:?set RAG__EMBEDDING__MODEL in .env (a dir under /models)}
+      RAG__EMBEDDING__DEVICE: ${RAG__EMBEDDING__DEVICE:-cpu}
+    volumes:
+      - rag-data:/data                            # persistent state (qdrant + manifest)
+      - ${MODELS_DIR:-./models}:/models:ro         # tokenizer + embedding model (read-only)
+      - ${DOCS:-./docs}:/docs:ro                   # documents to index (read-only)
+      # To define collections, mount a rag.toml with [collections.*] and point
+      # RAG at it (uncomment both lines):
+      # - ${RAG_CONFIG:-./rag.toml}:/config/rag.toml:ro
+      # and add to environment:  RAG_CONFIG_PATH: /config/rag.toml
+    # GPU (optional): uncomment to give RAG a GPU and set RAG__EMBEDDING__DEVICE=cuda.
+    # Requires the NVIDIA Container Toolkit on the host.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # --- Example vLLM service (commented out) -------------------------------------
+  # Run your own model server, or point the gateway at an external one via
+  # GATEWAY__MODEL__VLLM_BASE_URL. If you enable this, the default
+  # GATEWAY__MODEL__VLLM_BASE_URL=http://vllm:8000 already points at it.
+  #
+  # vllm:
+  #   image: vllm/vllm-openai:latest
+  #   restart: unless-stopped
+  #   ipc: host
+  #   expose:
+  #     - "8000"
+  #   volumes:
+  #     - ${MODELS_DIR:-./models}:/models:ro
+  #   command: >
+  #     --model /models/<your-model-dir>
+  #     --served-model-name ${GATEWAY__MODEL__MODEL_NAME:-qwen3-32b}
+  #     --port 8000
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: all
+  #             capabilities: [gpu]
+
+volumes:
+  gateway-data:
+  rag-data:
+
+# Opt-in secrets (uncomment with the per-service `secrets:` lists above). Each
+# file is named like the env override it provides; its contents are the raw
+# value (e.g. echo -n "sk-..." > ./secrets/gateway__model__api_key).
+# secrets:
+#   gateway__model__api_key:
+#     file: ./secrets/gateway__model__api_key
+#   gateway__web__brave_api_key:
+#     file: ./secrets/gateway__web__brave_api_key

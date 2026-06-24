@@ -1,0 +1,11 @@
+.venv/
+tests/
+docs/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+# dev config carries host-specific paths/tokenizer — never ship it.
+# The image bakes gateway.docker.toml instead.
+gateway.toml

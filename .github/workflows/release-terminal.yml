@@ -1,0 +1,73 @@
+name: Release terminal (PyPI)
+
+# On-demand only. Pick the branch or tag in the "Run workflow" dropdown.
+# The published version is read from clients/terminal/pyproject.toml by poetry.
+# Unchecked Publish  -> test build, uploads to TestPyPI.
+# Checked   Publish  -> real release, uploads to PyPI.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Real release to PyPI? Unchecked = test upload to TestPyPI."
+        type: boolean
+        default: false
+      test_suffix:
+        description: "Optional numeric suffix for TestPyPI uploads, appended as .dev<n> (e.g. 3 -> 1.0.0.dev3). Avoids version collisions when re-testing. Ignored for real PyPI releases."
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-terminal
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: clients/terminal
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      # Test uploads only: stamp a unique .dev<n> version so TestPyPI re-uploads
+      # don't collide. Must run before build, since poetry bakes the version in.
+      - name: Apply test version suffix
+        if: ${{ inputs.publish == false && inputs.test_suffix != '' }}
+        env:
+          TEST_SUFFIX: ${{ inputs.test_suffix }}
+        run: |
+          if ! printf '%s' "$TEST_SUFFIX" | grep -qE '^[0-9]+$'; then
+            echo "::error::test_suffix must be numeric (it becomes a PEP 440 .dev<n> segment)."
+            exit 1
+          fi
+          base=$(poetry version -s)
+          poetry version "${base}.dev${TEST_SUFFIX}"
+          echo "Test version set to $(poetry version -s)"
+
+      - name: Build wheel + sdist
+        run: poetry build
+
+      - name: Publish to TestPyPI
+        if: ${{ inputs.publish == false }}
+        env:
+          POETRY_REPOSITORIES_TESTPYPI_URL: https://test.pypi.org/legacy/
+          POETRY_PYPI_TOKEN_TESTPYPI: ${{ secrets.PYPI_TEST_TOKEN }}
+        run: poetry publish -r testpypi
+
+      - name: Publish to PyPI
+        if: ${{ inputs.publish == true }}
+        env:
+          POETRY_PYPI_TOKEN_PYPI: ${{ secrets.PYPI_TOKEN }}
+        run: poetry publish

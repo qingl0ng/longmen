@@ -1,0 +1,100 @@
+[tool.poetry]
+name = "terminal-assistant-gateway"
+version = "1.0.0"
+description = "Gateway daemon for the terminal coding assistant — owns projects, agents, sessions, and tool execution"
+authors = ["qingl0ng <qingl0ng@users.noreply.github.com>"]
+readme = "README.md"
+license = "MIT"
+homepage = "https://github.com/qingl0ng/longmen"
+repository = "https://github.com/qingl0ng/longmen"
+keywords = ["llm", "coding-assistant", "self-hosted", "vllm", "gateway", "asyncio"]
+packages = [{ include = "assistant", from = "src" }]
+
+[tool.poetry.scripts]
+gateway = "assistant.gateway.server:run"
+
+[tool.poetry.dependencies]
+python = "^3.13"
+
+# vLLM communication (async HTTP client with SSE streaming)
+httpx = "^0.28.1"
+
+# WebSocket server
+websockets = "^15.0"
+
+# Message validation and serialization
+pydantic = "^2.10"
+
+# Layered configuration: TOML base + env var + docker-secret overrides
+pydantic-settings = "^2.7"
+
+# Tokenizer (lightweight Rust-backed, for accurate Qwen3 token counting)
+tokenizers = "^0.21"
+huggingface-hub = "^0.27"
+
+# Configuration (writing TOML — reading uses stdlib tomllib)
+tomli-w = "^1.1"
+
+# Logging (structured, JSON-capable)
+structlog = "^25.1"
+
+# Retry logic (vLLM calls, tool execution)
+tenacity = "^9.1"
+
+# File watcher for hot reload (async, Rust-backed inotify)
+watchfiles = "^1.0"
+
+# Web content extraction (for web_fetch tool)
+beautifulsoup4 = "^4.12"
+trafilatura = "^1.12"
+
+# Tree-sitter — universal fallback symbol parser for Rust, Go, Java, JS, etc.
+tree-sitter = ">=0.25,<0.26"
+tree-sitter-python = ">=0.23,<0.24"
+tree-sitter-c = ">=0.23,<0.24"
+tree-sitter-cpp = ">=0.23,<0.24"
+tree-sitter-typescript = ">=0.23,<0.24"
+tree-sitter-javascript = ">=0.23,<0.24"
+tree-sitter-rust = ">=0.23,<0.24"
+tree-sitter-go = ">=0.23,<0.24"
+tree-sitter-java = ">=0.23,<0.24"
+
+# Optional database drivers (install with: poetry install -E postgresql / -E mysql)
+psycopg = { version = "^3.2", optional = true, extras = ["binary"] }
+pymysql = { version = "^1.1", optional = true }
+# sqlite3 is stdlib — no dependency needed
+python-dotenv = "1.2.2"
+
+[tool.poetry.extras]
+postgresql = ["psycopg"]
+mysql = ["pymysql"]
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^9.0"
+pytest-asyncio = "^1.0"
+pytest-cov = "^7.0"
+pytest-rerunfailures = "^15.0"
+pytest-timeout = "^2.3"
+ruff = "^0.9"
+mypy = "^1.15"
+types-pymysql = "^1.1.0.20260408"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "SIM", "TCH"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+norecursedirs = ["tests/integration/fixtures"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true

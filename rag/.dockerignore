@@ -1,0 +1,14 @@
+.venv/
+tests/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+# dev config carries host-specific paths/tokenizer — never ship it.
+# The image bakes rag.docker.toml instead.
+rag.toml
+rag.toml.example
+# component task docs — not needed in the image (keep README for the build).
+*.md
+!README.md

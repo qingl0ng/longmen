@@ -1,0 +1,62 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.xml
+
+# Type checker
+.mypy_cache/
+
+# Linter
+.ruff_cache/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Secrets
+.env
+
+# OS
+.DS_Store
+
+# Compose secrets (real secret material — never commit)
+deploy/secrets/*
+!deploy/secrets/.gitkeep
+!deploy/secrets/README.md
+
+# === Release hygiene (public repo) ===
+# Internal docs and test suites are kept private — not part of the public release.
+gateway/docs/
+gateway/tests/
+rag/tests/
+clients/terminal/docs/
+clients/terminal/tests/
+
+# Keep all Markdown private except the two public docs and anything under the
+# root docs/ folder (genuine end-user documentation lives there or in READMEs).
+# This sweeps up CLAUDE.md, RELEASE-PREP.md, design notes, etc.
+*.md
+!README.md
+!CHANGELOG.md
+!/docs/
+!/docs/**

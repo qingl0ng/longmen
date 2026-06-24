@@ -1,0 +1,43 @@
+# RAG Service Configuration
+# Copy to ~/.longmen/rag/rag.toml and edit paths (or pass --config / set
+# RAG_CONFIG_PATH). For container deployments this file is not used — the image
+# bakes rag.docker.toml and everything is supplied via env/secrets.
+
+[service]
+host = "127.0.0.1"
+port = 8421
+log_level = "info"
+
+[embedding]
+model = "BAAI/bge-small-en-v1.5"
+device = "cpu"                        # "cpu" | "cuda" | "auto"
+batch_size = 64
+
+[chunking]
+default_chunk_size = 1024
+default_overlap = 128
+
+[search]
+default_top_k = 10
+min_score = 0.6
+
+[tokenizer]
+path = "~/.longmen/rag/tokenizer.json"   # local tokenizer.json, required (offline; never downloaded)
+
+[storage]
+data_dir = "~/.longmen/rag"
+
+[watcher]
+enabled = true                        # set to false to disable file watching
+debounce_seconds = 3.0                # quiet window after last change before indexing starts
+watch_config = true                   # watch rag.toml for changes (hot-reload collections)
+
+# Define collections below. Each collection maps to a directory on your filesystem.
+# Files in the directory are indexed recursively.
+# Supported formats: .md, .txt, .rst, .pdf
+
+# [collections.my-docs]
+# path = "/home/user/docs/my-reference"
+# description = "My reference documentation"
+# chunk_size = 1024                   # optional, overrides [chunking].default_chunk_size
+# overlap = 128                       # optional, overrides [chunking].default_overlap
