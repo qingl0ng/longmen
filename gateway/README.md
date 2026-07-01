@@ -41,7 +41,15 @@ api_key = ""          # leave empty for local vLLM with no auth
 temperature = 0.7
 max_tokens = 4096
 tokenizer_path = "/path/to/model/tokenizer.json"   # required, local file
+
+[permissions]
+workflow_mode = "allow_all"   # only supported mode; "prompt" is under development
 ```
+
+> **Workflow mode:** only `allow_all` is currently supported — tool calls
+> auto-execute within the project sandbox without prompting. The interactive
+> `prompt` mode (per-call approval with persistent "remember" rules) is still
+> under development; setting it is not yet recommended.
 
 `tokenizer_path` is **required**: it must point to a local `tokenizer.json` on disk. The gateway never downloads tokenizers; it loads `tokenizer.json` from disk for all token counting. Starting with a missing or empty `tokenizer_path` fails fast with a clear error.
 

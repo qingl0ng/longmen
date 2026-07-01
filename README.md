@@ -25,7 +25,10 @@ leave your machine.
   tools, writes an explicit plan, then executes each step with automatic triage
   and self-correction when builds or tests fail.
 - **Tool sandboxing & approvals.** Every tool call is confined to a project's
-  root and gated by an interactive approval flow (with "remember" rules).
+  root. The gateway currently supports only the `allow_all` workflow mode, in
+  which tool calls execute automatically within that sandbox. An interactive
+  `prompt` mode (per-call approval with "remember" rules) is still under
+  development.
 - **Thin, swappable clients.** The gateway owns all state and logic; clients just
   render output and collect input. A terminal client ships today; a desktop
   client is planned.

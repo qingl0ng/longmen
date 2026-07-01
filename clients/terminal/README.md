@@ -172,6 +172,11 @@ Rules:
 
 ## Approval Dialog
 
+> **Note:** the interactive approval dialog applies to the gateway's `prompt`
+> workflow mode, which is **still under development**. The only supported mode
+> today is `allow_all`, where tool calls execute automatically and no dialog is
+> shown. The behaviour below describes the in-progress `prompt` mode.
+
 When the model wants to run a tool, an approval dialog is shown:
 
 ```
