@@ -111,6 +111,15 @@ class Connection:
                 logger.warning("Connection error: %s", e)
                 if self.on_disconnect:
                     self.on_disconnect()
+            except websockets.exceptions.WebSocketException as e:
+                # Handshake-level failure while reconnecting — e.g. the Docker
+                # port is open but the gateway isn't serving valid HTTP yet
+                # ("did not receive a valid HTTP response"). Not an OSError, so
+                # it would otherwise escape and crash the listener. Retry it.
+                self.state = "reconnecting"
+                logger.warning("Handshake failed, will retry: %s", e)
+                if self.on_disconnect:
+                    self.on_disconnect()
 
             if self.state == "reconnecting":
                 delay = _BACKOFF_SEQUENCE[min(backoff_idx, len(_BACKOFF_SEQUENCE) - 1)]

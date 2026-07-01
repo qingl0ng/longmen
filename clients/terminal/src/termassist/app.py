@@ -66,6 +66,11 @@ class App:
         self._input: InputHandler | None = None
         self._file_index: set[str] = set()
         self._msg_log_file: IO[str] | None = None  # open file handle for message log
+        # Set by `/project add` to the id being created. project_upsert only
+        # creates the project — it does NOT activate it on the gateway session.
+        # When the listener sees the matching creation-ack project_context, it
+        # follows up with a real project_select so context/root actually switch.
+        self._pending_created_project: str | None = None
 
     async def run(self) -> None:
         cfg = self._config
@@ -154,12 +159,11 @@ class App:
         """Select a project before the main loop starts.
 
         Priority:
-          1. config.project.id already set (from --project flag or saved config)
-          2. Only one project on the gateway → auto-select
-          3. Multiple projects → show numbered picker and prompt user
+          1. Zero projects on the gateway → first-run bootstrap (create one)
+          2. Exactly one project → auto-select it
+          3. Multiple projects → always show the numbered picker (the saved
+             config.project.id is not auto-loaded when several projects exist)
         """
-        cfg = self._config
-
         # Fetch the project list
         await conn.send(make_project_list())
         try:
@@ -180,19 +184,18 @@ class App:
             await self._bootstrap_first_project(conn, renderer)
             return
 
-        # If a project id is already configured, verify it exists and select it
-        if cfg.project.id and cfg.project.id in projects:
-            await self._do_select_project(conn, renderer, cfg.project.id)
-            return
-
-        # If only one project, auto-select it
+        # If only one project, auto-select it — there is nothing to choose.
         if len(projects) == 1:
             project_id = next(iter(projects))
             renderer.render_info(f"Auto-selected project: {project_id}")
             await self._do_select_project(conn, renderer, project_id)
             return
 
-        # Multiple projects — show a picker
+        # Multiple projects — always show the picker so the user chooses which to
+        # load. We deliberately do NOT auto-select the saved config.project.id
+        # here: with several projects the saved id is ambiguous (it only ever
+        # tracks the bootstrap project, since runtime switches aren't persisted),
+        # so silently loading it surprised users. Let them pick every time.
         renderer.print("\nAvailable projects:")
         project_list = list(projects.items())
         for i, (pid, info) in enumerate(project_list, 1):
@@ -266,7 +269,7 @@ class App:
             await conn.send(make_project_upsert(project_id, project))
 
             try:
-                msg = await asyncio.wait_for(conn.recv(), timeout=10)
+                msg = await self._recv_skipping_broadcasts(conn, 10)
             except TimeoutError:
                 renderer.render_warning(
                     "Timeout waiting for project creation. Continuing without a project."
@@ -274,26 +277,20 @@ class App:
                 return
 
             if msg["type"] == "project_context":
-                payload = msg["payload"]
-                pid = payload.get("project_id", project_id)
+                pid = msg["payload"].get("project_id", project_id)
+                # The project_upsert reply is only a creation ack — it does NOT
+                # make the project active on the gateway session. Drain the
+                # trailing file_index it sends, then issue a real project_select
+                # so the session's active_project_id is set; otherwise the first
+                # prompt fails with no_project_selected. project_select also runs
+                # project-type detection + RAG setup gateway-side.
+                with contextlib.suppress(TimeoutError):
+                    await self._recv_skipping_broadcasts(conn, 5)
+                await self._do_select_project(conn, renderer, pid)
+                # This is the one deliberate persistence point: make the freshly
+                # created project the saved default for next launch.
                 self._config.project.id = pid
                 self._config.save()
-                agents = payload.get("agents", {})
-                agent_names = list(agents.keys())
-                if agent_names:
-                    renderer.render_info(f"Project: {pid}  |  Agents: {', '.join(agent_names)}")
-                else:
-                    renderer.render_info(f"Project: {pid}")
-                # Drain the trailing file_index (mirrors _do_select_project's drain).
-                # The listener loop hasn't started, so apply it inline; ignore on timeout.
-                try:
-                    next_msg = await asyncio.wait_for(conn.recv(), timeout=5)
-                    if next_msg["type"] == "file_index":
-                        self._file_index = set(next_msg["payload"]["files"])
-                        if self._input is not None:
-                            self._input.set_file_index(self._file_index)
-                except TimeoutError:
-                    pass
                 return
             elif msg["type"] == "error":
                 renderer.render_error(msg["payload"])
@@ -306,13 +303,40 @@ class App:
                 )
                 return
 
+    async def _recv_skipping_broadcasts(
+        self, conn: Connection, timeout: float
+    ) -> dict[str, Any]:
+        """Recv the next message, skipping out-of-band broadcasts.
+
+        The pre-listener inline flows (project select / first-run bootstrap)
+        expect a specific ordered reply sequence. The config watcher can
+        broadcast `config_reloaded` at any time — notably, `project_upsert`
+        writes `project.toml`, which the watcher picks up and broadcasts, and
+        that broadcast can land *between* the `project_context` and `file_index`
+        of the reply (the file_index is built in an executor, so it can lag past
+        the watcher's debounce). Drop such broadcasts here so the inline
+        sequence stays aligned. The runtime listener ignores `config_reloaded`
+        too, so nothing is lost. Raises `TimeoutError` if no relevant message
+        arrives within `timeout`.
+        """
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + timeout
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError
+            msg = await asyncio.wait_for(conn.recv(), timeout=remaining)
+            if msg["type"] == "config_reloaded":
+                continue
+            return msg
+
     async def _do_select_project(
         self, conn: Connection, renderer: Renderer, project_id: str
     ) -> None:
         """Send project_select and wait for project_context."""
         await conn.send(make_project_select(project_id))
         try:
-            msg = await asyncio.wait_for(conn.recv(), timeout=10)
+            msg = await self._recv_skipping_broadcasts(conn, 10)
         except TimeoutError:
             renderer.render_warning(f"Timeout waiting for project context for {project_id!r}.")
             return
@@ -332,7 +356,7 @@ class App:
             # stash it so subsequent recv calls still see it.
             stashed: dict[str, Any] | None = None
             try:
-                next_msg = await asyncio.wait_for(conn.recv(), timeout=5)
+                next_msg = await self._recv_skipping_broadcasts(conn, 5)
                 if next_msg["type"] == "file_index":
                     self._file_index = set(next_msg["payload"]["files"])
                     if self._input is not None:
@@ -348,7 +372,7 @@ class App:
                     msg = stashed
                     stashed = None
                     return msg
-                return await asyncio.wait_for(conn.recv(), timeout=timeout)
+                return await self._recv_skipping_broadcasts(conn, timeout)
 
             if last_session:
                 self._state.last_session_id = last_session["session_id"]
@@ -461,6 +485,9 @@ class App:
 
                 case "error":
                     renderer.stop_spinner()
+                    # A failed `/project add` (e.g. bad root_path) replies with an
+                    # error instead of project_context — drop the pending select.
+                    self._pending_created_project = None
                     renderer.render_error(payload)
                     if payload.get("recoverable", True):
                         with contextlib.suppress(Exception):
@@ -512,6 +539,16 @@ class App:
                         self._input.set_file_index(self._file_index)
 
                 case "project_context":
+                    pid_ctx = payload.get("project_id", "")
+                    if pid_ctx and pid_ctx == self._pending_created_project:
+                        # Creation ack from `/project add`. project_upsert created
+                        # the project but did NOT activate it on the gateway
+                        # session, so context/root would stay on the previous
+                        # project. Follow up with a real project_select; its
+                        # project_context (below) does the actual switch render.
+                        self._pending_created_project = None
+                        await conn.send(make_project_select(pid_ctx))
+                        continue
                     # Response to /project <id> sent at runtime
                     self._config.project.id = payload.get("project_id", self._config.project.id)
                     agents = payload.get("agents", {})
@@ -701,6 +738,10 @@ class App:
                 project: dict[str, Any] = {"root_path": cmd.args["root_path"]}
                 if cmd.args.get("description"):
                     project["description"] = cmd.args["description"]
+                # Remember which project we're creating so the listener can issue
+                # a real project_select once the creation-ack project_context
+                # arrives (upsert alone does not switch the gateway session).
+                self._pending_created_project = cmd.args["id"]
                 await conn.send(make_project_upsert(cmd.args["id"], project))
             elif "id" in cmd.args:
                 # Switch to a specific project — send project_select.
